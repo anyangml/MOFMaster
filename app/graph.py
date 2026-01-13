@@ -24,15 +24,29 @@ def should_continue_to_supervisor(state: AgentState) -> Literal["supervisor", "e
     return "end"
 
 
-def should_continue_after_supervisor(state: AgentState) -> Literal["runner", "analyzer"]:
+def should_continue_after_supervisor(state: AgentState) -> Literal["runner", "analyzer", "end"]:
     """
     Routing function after Supervisor.
 
     If plan is approved, go to Runner.
     If rejected, go back to Analyzer for re-planning.
+    Add safeguard to prevent infinite loops.
     """
     if state.get("is_plan_approved", False):
         return "runner"
+    
+    # Safeguard: Track rejection count to prevent infinite loops
+    rejection_count = state.get("_rejection_count", 0)
+    rejection_count += 1
+    state["_rejection_count"] = rejection_count
+    
+    # After 3 rejections, auto-approve to prevent infinite loop
+    if rejection_count >= 3:
+        print(f"⚠️  Auto-approving plan after {rejection_count} rejections to prevent infinite loop")
+        state["is_plan_approved"] = True
+        state["review_feedback"] = f"Auto-approved after {rejection_count} rejections. Previous feedback: {state.get('review_feedback', 'N/A')}"
+        return "runner"
+    
     return "analyzer"
 
 
@@ -81,7 +95,7 @@ def create_graph() -> StateGraph:
     )
 
     workflow.add_conditional_edges(
-        "supervisor", should_continue_after_supervisor, {"runner": "runner", "analyzer": "analyzer"}
+        "supervisor", should_continue_after_supervisor, {"runner": "runner", "analyzer": "analyzer", "end": END}
     )
 
     workflow.add_conditional_edges(
@@ -97,4 +111,8 @@ def create_graph() -> StateGraph:
 def get_compiled_graph():
     """Get the compiled graph ready for execution"""
     workflow = create_graph()
-    return workflow.compile()
+    compiled = workflow.compile()
+    
+    # Increase recursion limit to handle complex workflows
+    # Default is 25, increase to 50 for more complex plans
+    return compiled

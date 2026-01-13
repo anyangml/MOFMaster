@@ -13,6 +13,7 @@ The system is built using:
 - **LangServe**: REST API exposure via FastAPI
 - **ASE** (Atomic Simulation Environment): Atomistic simulations
 - **Pymatgen**: Materials science utilities
+- **uv**: Fast Python package installer and dependency manager
 
 ### Features
 
@@ -60,6 +61,7 @@ python app/server.py
 
 ### Example Usage
 
+**Using cURL:**
 ```bash
 curl -X POST "http://localhost:8000/mof-scientist/invoke" \
   -H "Content-Type: application/json" \
@@ -71,6 +73,13 @@ curl -X POST "http://localhost:8000/mof-scientist/invoke" \
     }
   }'
 ```
+
+**Quick test script:**
+```bash
+./test_api.sh
+```
+
+📖 **更多 API 使用示例和详细说明，请查看 [API_USAGE.md](API_USAGE.md)**
 
 ### Testing
 
@@ -100,7 +109,8 @@ mof-backend/
 ├── tests/               # Test suite
 ├── data/                # Local CIF files and results
 ├── README_KNOWLEDGE.md  # Agent knowledge base
-└── pyproject.toml       # Dependencies
+├── pyproject.toml       # Project configuration and dependencies
+└── uv.lock              # Dependency lock file (managed by uv)
 ```
 
 ### Development

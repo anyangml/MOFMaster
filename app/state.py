@@ -2,7 +2,8 @@
 MOF-Scientist Backend - TypedDict State Definition
 """
 
-from typing import TypedDict, List, Dict, Any, Annotated
+from typing import List, Dict, Any, Annotated
+from typing_extensions import TypedDict
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 
