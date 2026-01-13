@@ -27,11 +27,11 @@ The system is built using:
 
 1. **Install dependencies**:
 ```bash
-# Using Poetry (recommended)
-poetry install
+# Using uv (recommended)
+uv sync
 
 # Or using pip
-pip install -r requirements.txt
+pip install -e .
 ```
 
 2. **Configure environment**:
@@ -42,7 +42,7 @@ cp .env.example .env
 
 3. **Run the server**:
 ```bash
-poetry run python -m app.server
+uv run python -m app.server
 # Or
 python app/server.py
 ```
@@ -76,13 +76,13 @@ curl -X POST "http://localhost:8000/mof-scientist/invoke" \
 
 ```bash
 # Run all tests
-poetry run pytest
+uv run pytest
 
 # Run with coverage
-poetry run pytest --cov=app
+uv run pytest --cov=app
 
 # Run specific test file
-poetry run pytest tests/unit/test_tools.py
+uv run pytest tests/unit/test_tools.py
 ```
 
 ### Project Structure
@@ -105,9 +105,9 @@ mof-backend/
 
 ### Development
 
-- **Linting**: `poetry run black app/ && poetry run ruff check app/`
-- **Type checking**: `poetry run mypy app/`
-- **Format**: `poetry run black app/`
+- **Linting**: `uv run ruff check app/`
+- **Format**: `uv run black app/`
+- **Type checking**: `uv run mypy app/` (requires mypy to be installed)
 
 ### License
 
