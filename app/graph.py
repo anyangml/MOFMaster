@@ -30,21 +30,18 @@ def should_continue_after_supervisor(state: AgentState) -> Literal["runner", "an
 
     If plan is approved, go to Runner.
     If rejected, go back to Analyzer for re-planning.
-    Add safeguard to prevent infinite loops.
+    
+    Note: Rejection count tracking is handled in supervisor_node to ensure
+    state mutations persist properly.
     """
     if state.get("is_plan_approved", False):
         return "runner"
     
-    # Safeguard: Track rejection count to prevent infinite loops
+    # Check rejection count (set by supervisor_node)
     rejection_count = state.get("_rejection_count", 0)
-    rejection_count += 1
-    state["_rejection_count"] = rejection_count
     
     # After 3 rejections, auto-approve to prevent infinite loop
     if rejection_count >= 3:
-        print(f"⚠️  Auto-approving plan after {rejection_count} rejections to prevent infinite loop")
-        state["is_plan_approved"] = True
-        state["review_feedback"] = f"Auto-approved after {rejection_count} rejections. Previous feedback: {state.get('review_feedback', 'N/A')}"
         return "runner"
     
     return "analyzer"
@@ -113,6 +110,9 @@ def get_compiled_graph():
     workflow = create_graph()
     compiled = workflow.compile()
     
-    # Increase recursion limit to handle complex workflows
+    # Set recursion limit to handle complex workflows and prevent infinite loops
     # Default is 25, increase to 50 for more complex plans
+    # This prevents infinite loops while allowing reasonable retry attempts
+    compiled.recursion_limit = 10
+    
     return compiled

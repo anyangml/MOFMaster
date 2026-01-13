@@ -1,12 +1,10 @@
-"""
-LangSmith Configuration and Utilities
-
-This module provides utilities for configuring and using LangSmith tracing.
-"""
-
+import logging
 import os
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 # Ensure environment variables are loaded
 load_dotenv()
@@ -113,20 +111,20 @@ def validate_langsmith_config() -> tuple[bool, list[str]]:
 
 def print_langsmith_status() -> None:
     """
-    Print LangSmith configuration status to console.
+    Log LangSmith configuration status.
     Useful for startup logging.
     """
     config = get_langsmith_config()
 
     if config["enabled"]:
-        print("=" * 60)
-        print("LangSmith Tracing: ENABLED")
-        print(f"  Project: {config['project'] or '(default)'}")
-        print(f"  API Key: {'✓ Set' if config['api_key_set'] else '✗ Not Set'}")
-        print(f"  Endpoint: {config['endpoint']}")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("LangSmith Tracing: ENABLED")
+        logger.info(f"  Project: {config['project'] or '(default)'}")
+        logger.info(f"  API Key: {'✓ Set' if config['api_key_set'] else '✗ Not Set'}")
+        logger.info(f"  Endpoint: {config['endpoint']}")
+        logger.info("=" * 60)
     else:
-        print("=" * 60)
-        print("LangSmith Tracing: DISABLED")
-        print("  To enable, set LANGCHAIN_TRACING_V2=true in your .env file")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("LangSmith Tracing: DISABLED")
+        logger.info("  To enable, set LANGCHAIN_TRACING_V2=true in your .env file")
+        logger.info("=" * 60)

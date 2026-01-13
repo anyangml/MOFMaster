@@ -1,12 +1,8 @@
-"""
-FastAPI Server with LangServe - API Entry Point
-"""
-
-# IMPORTANT: Load environment variables FIRST, before importing anything else
-# This ensures LangSmith tracing is configured before LangChain components are initialized
+import logging
 from dotenv import load_dotenv
 load_dotenv()
 
+import traceback
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 from fastapi import FastAPI, Request
@@ -14,7 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from langserve import add_routes
 from langchain_core.messages import convert_to_messages
-import traceback
 
 from app.graph import get_compiled_graph
 from app.utils.langsmith_config import (
@@ -29,10 +24,10 @@ async def lifespan(app: FastAPI):
     # Startup
     is_valid, issues = validate_langsmith_config()
     if not is_valid:
-        print("⚠️  LangSmith Configuration Issues:")
+        logger.warning("⚠️  LangSmith Configuration Issues:")
         for issue in issues:
-            print(f"   - {issue}")
-        print("   Traces may not be sent to LangSmith.")
+            logger.warning(f"   - {issue}")
+        logger.warning("   Traces may not be sent to LangSmith.")
     print_langsmith_status()
     yield
     # Shutdown (if needed)
@@ -41,6 +36,15 @@ async def lifespan(app: FastAPI):
 # Check for debug mode
 import os
 debug_mode = os.getenv("DEBUG", "false").lower() == "true"
+
+# Setup logger
+# Configure logging to include timestamps and levels
+logging.basicConfig(
+    level=logging.DEBUG if debug_mode else logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 # Create FastAPI app with lifespan
 app = FastAPI(
@@ -68,8 +72,8 @@ graph = get_compiled_graph()
 async def global_exception_handler(request: Request, exc: Exception):
     """Global exception handler to log errors and return detailed error messages."""
     error_traceback = traceback.format_exc()
-    print(f"\n❌ Error occurred: {type(exc).__name__}: {str(exc)}")
-    print(f"📋 Traceback:\n{error_traceback}")
+    logger.error(f"❌ Error occurred: {type(exc).__name__}: {str(exc)}")
+    logger.error(f"📋 Traceback:\n{error_traceback}")
     # Show full traceback in debug mode
     return JSONResponse(
         status_code=500,
@@ -114,7 +118,8 @@ def convert_input(input_data: Dict[str, Any]) -> Dict[str, Any]:
         "tool_outputs": {},
         "review_feedback": "",
         "is_plan_approved": False,
-        "_rejection_count": 0,  # Track rejections to prevent infinite loops
+        "_rejection_count": 0,  # Track rejections to prevent infinite loops (incremented by supervisor)
+        "_previous_plan": [],  # Track previous plan for supervisor comparison
     }
     
     if "messages" in input_data:

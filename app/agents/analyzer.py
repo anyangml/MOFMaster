@@ -1,12 +1,12 @@
-"""
-Analyzer Agent - Scoping, Context Gathering, and Planning
-"""
-
+import logging
 from pathlib import Path
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 from app.state import AgentState
 from app.utils.llm import get_analyzer_llm
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 def load_knowledge_base() -> str:
@@ -26,10 +26,13 @@ Your job is to:
 KNOWLEDGE BASE:
 {knowledge_base}
 
+{feedback_section}
+
 INSTRUCTIONS:
 - If the query is OUT OF SCOPE, politely explain what you cannot do and suggest alternatives
 - If you're missing context (e.g., user asks for energy but no structure provided), ask for it
 - If ready to proceed, output a plan as a JSON list of tool names
+- If there is supervisor feedback, carefully consider it and improve your plan accordingly
 
 OUTPUT FORMAT when ready to plan:
 ```json
@@ -88,11 +91,30 @@ def analyzer_node(state: AgentState) -> AgentState:
     if not user_query:
         return state
 
+    # Check if there's supervisor feedback (from a previous rejection)
+    review_feedback = state.get("review_feedback", "")
+    rejection_count = state.get("_rejection_count", 0)
+    
+    # Build feedback section if there's feedback
+    if review_feedback and rejection_count > 0:
+        feedback_section = f"""
+PREVIOUS PLAN REJECTION FEEDBACK (attempt {rejection_count}):
+The supervisor rejected the previous plan with this feedback:
+{review_feedback}
+
+IMPORTANT: Please carefully consider this feedback and create an improved plan that addresses the supervisor's concerns.
+"""
+    else:
+        feedback_section = ""
+
     # Create prompt
     llm = get_analyzer_llm()
 
     system_message = SystemMessage(
-        content=ANALYZER_SYSTEM_PROMPT.format(knowledge_base=knowledge_base)
+        content=ANALYZER_SYSTEM_PROMPT.format(
+            knowledge_base=knowledge_base,
+            feedback_section=feedback_section
+        )
     )
 
     # Invoke LLM
@@ -100,43 +122,104 @@ def analyzer_node(state: AgentState) -> AgentState:
 
     # Parse response - look for JSON in the content
     content = response.content
+    logger.debug(f"🔍 Analyzer: Raw LLM response content (first 500 chars): {content[:500]}")
 
-    # Try to extract JSON from markdown code blocks
+    # Try to extract JSON from the content
     import json
     import re
 
+    parsed = None
+    
+    # Strategy 1: Look for JSON in markdown code blocks
     json_match = re.search(r"```json\s*(\{.*?\})\s*```", content, re.DOTALL)
     if json_match:
         try:
             parsed = json.loads(json_match.group(1))
-
-            if parsed.get("status") == "ready" and "plan" in parsed:
-                # We have a valid plan
-                state["plan"] = parsed["plan"]
-                state["original_query"] = user_query
-                state["current_step"] = 0
-                state["messages"].append(
-                    AIMessage(
-                        content=f"I've created a plan to address your request: {', '.join(parsed['plan'])}"
-                    )
-                )
-            elif parsed.get("status") == "need_context":
-                # Need more information
-                state["messages"].append(
-                    AIMessage(content=parsed.get("question", "I need more information."))
-                )
-            elif parsed.get("status") == "out_of_scope":
-                # Out of scope
-                state["messages"].append(
-                    AIMessage(
-                        content=f"I'm sorry, but this request is outside my current capabilities. {parsed.get('reason', '')}"
-                    )
-                )
+            logger.info(f"✅ Analyzer: Found and parsed JSON from markdown block")
         except json.JSONDecodeError:
-            # If JSON parsing fails, just add the response as-is
-            state["messages"].append(response)
-    else:
-        # No JSON found, add response as-is
-        state["messages"].append(response)
+            logger.warning(f"⚠️  Analyzer: Found markdown block but JSON parsing failed")
 
-    return state
+    # Strategy 2: If no valid JSON yet, look for any curly brace structure
+    if not parsed:
+        # Try to find the first '{' and the last '}'
+        start = content.find('{')
+        end = content.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            json_str = content[start:end+1]
+            try:
+                parsed = json.loads(json_str)
+                logger.info(f"✅ Analyzer: Found and parsed JSON using brace matching")
+            except json.JSONDecodeError:
+                logger.warning(f"⚠️  Analyzer: Found brace structure but JSON parsing failed")
+
+    # Strategy 3: Try parsing the entire content
+    if not parsed:
+        try:
+            parsed = json.loads(content.strip())
+            logger.info(f"✅ Analyzer: Parsed entire response as JSON")
+        except json.JSONDecodeError:
+            pass
+
+    if parsed and isinstance(parsed, dict):
+        try:
+            if parsed.get("status") == "ready" and "plan" in parsed:
+                logger.info(f"✅ Analyzer: Successfully processed 'ready' status")
+                
+                # Store previous plan before creating new one (for supervisor comparison)
+                current_plan = state.get("plan", [])
+                
+                # We have a valid plan - extract it explicitly
+                new_plan_raw = parsed["plan"]
+                
+                if not isinstance(new_plan_raw, list):
+                    new_plan = list(new_plan_raw) if new_plan_raw else []
+                else:
+                    new_plan = new_plan_raw.copy()
+                
+                # Create message content
+                plan_str = ', '.join(new_plan)
+                
+                # Re-read rejection_count from state
+                current_rejection_count = state.get("_rejection_count", 0)
+                is_revision = current_rejection_count > 0
+                
+                if is_revision:
+                    message_content = f"I've revised the plan based on your feedback (revision #{current_rejection_count}): {plan_str}"
+                else:
+                    message_content = f"I've created a plan to address your request: {plan_str}"
+                
+                # Create the message
+                new_message = AIMessage(content=message_content)
+                
+                # Determine what to return
+                updates = {
+                    "messages": [new_message],
+                    "plan": new_plan,
+                    "original_query": user_query,
+                    "current_step": 0
+                }
+                
+                if current_plan:
+                    updates["_previous_plan"] = current_plan
+                
+                return updates
+                
+            elif parsed.get("status") == "need_context":
+                return {
+                    "messages": [AIMessage(content=parsed.get("question", "I need more information."))]
+                }
+            elif parsed.get("status") == "out_of_scope":
+                return {
+                    "messages": [
+                        AIMessage(
+                            content=f"I'm sorry, but this request is outside my current capabilities. {parsed.get('reason', '')}"
+                        )
+                    ]
+                }
+        except Exception as e:
+            logger.error(f"❌ Analyzer: Error processing parsed JSON: {e}")
+            return {"messages": [response]}
+    
+    # If we get here, no valid JSON was found or it couldn't be processed
+    logger.warning(f"⚠️  Analyzer: No valid JSON plan found in response")
+    return {"messages": [response]}

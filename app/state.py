@@ -34,3 +34,7 @@ class AgentState(TypedDict):
     # Supervisor feedback
     review_feedback: str
     is_plan_approved: bool
+    
+    # Loop prevention and revision tracking
+    _rejection_count: int
+    _previous_plan: List[str]  # Track previous plan for comparison
