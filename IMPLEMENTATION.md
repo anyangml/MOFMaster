@@ -129,7 +129,7 @@ The `example_usage.py` script demonstrates three workflows:
 
 Run with:
 ```bash
-poetry run python example_usage.py
+uv run python example_usage.py
 ```
 
 ## Scientific Capabilities
@@ -150,22 +150,22 @@ poetry run python example_usage.py
 
 ```bash
 # Install dependencies
-poetry install
+uv sync
 
 # Configure environment
 cp .env.example .env
 # Edit .env and add API keys
 
 # Run tests
-poetry run pytest
+uv run pytest
 
 # Run example
-poetry run python example_usage.py
+uv run python example_usage.py
 
 # Start API server
-poetry run python app/server.py
+uv run python app/server.py
 # Or
-poetry run uvicorn app.server:app --host 0.0.0.0 --port 8000
+uv run uvicorn app.server:app --host 0.0.0.0 --port 8000
 ```
 
 ## API Usage
@@ -266,7 +266,7 @@ tests/
 
 ### Configuration & Documentation (5 files)
 ```
-pyproject.toml          # Poetry dependencies
+pyproject.toml          # Project dependencies (using uv)
 .env.example            # Environment template
 README.md               # Main README (updated)
 README_KNOWLEDGE.md     # Agent knowledge base

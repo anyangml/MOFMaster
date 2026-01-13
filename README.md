@@ -29,10 +29,10 @@ The system is built using:
 1. **Install dependencies**:
 ```bash
 # Using uv (recommended)
-uv sync --extra dev
+uv sync
 
-# Or using uv pip (if using an existing virtual environment)
-uv pip install -e ".[dev]"
+# Or using pip
+pip install -e .
 ```
 
 2. **Configure environment**:
@@ -43,11 +43,9 @@ cp .env.example .env
 
 3. **Run the server**:
 ```bash
-# If using uv-managed environment
 uv run python -m app.server
-
-# Or if using your own virtual environment
-python -m app.server
+# Or
+python app/server.py
 ```
 
 4. **Access the API**:
@@ -89,9 +87,6 @@ curl -X POST "http://localhost:8000/mof-scientist/invoke" \
 # Run all tests
 uv run pytest
 
-# Or if using your own virtual environment
-pytest
-
 # Run with coverage
 uv run pytest --cov=app
 
@@ -120,17 +115,9 @@ mof-backend/
 
 ### Development
 
-- **Linting**: `uv run black app/ && uv run ruff check app/`
-- **Type checking**: `uv run mypy app/` (if mypy is installed)
+- **Linting**: `uv run ruff check app/`
 - **Format**: `uv run black app/`
-- **Debugging with LangSmith**: See [LANGSMITH_DEV_GUIDE.md](LANGSMITH_DEV_GUIDE.md) for detailed instructions on using LangSmith to debug and monitor your workflows
-
-**Note**: If you're using your own virtual environment (e.g., `agent`), you can run these commands directly:
-```bash
-black app/
-ruff check app/
-pytest
-```
+- **Type checking**: Install mypy with `uv pip install mypy`, then run `uv run mypy app/`
 
 ### License
 
