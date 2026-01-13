@@ -1,0 +1,48 @@
+[tool.poetry]
+name = "mof-backend"
+version = "1.0.0"
+description = "Scientific workflow agent for Metal-Organic Frameworks computational chemistry"
+authors = ["MOFMaster Team"]
+readme = "README.md"
+packages = [{include = "app"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+langgraph = "^0.2.0"
+langchain = "^0.3.0"
+langchain-openai = "^0.2.0"
+langchain-anthropic = "^0.2.0"
+langserve = {extras = ["server"], version = "^0.3.0"}
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.32.0"}
+ase = "^3.23.0"
+pymatgen = "^2024.0.0"
+pydantic = "^2.10.0"
+python-dotenv = "^1.0.0"
+numpy = "^1.26.0"
+httpx = "^0.27.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.0"
+pytest-asyncio = "^0.24.0"
+black = "^24.10.0"
+ruff = "^0.8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
