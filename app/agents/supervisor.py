@@ -1,12 +1,14 @@
-"""
-Supervisor Agent - Plan Review and Quality Control
-"""
-
+import logging
+import json
+import re
 from langchain_core.messages import SystemMessage
 
 from app.state import AgentState
 from app.schema import SupervisorReview
 from app.utils.llm import get_supervisor_llm
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 SUPERVISOR_SYSTEM_PROMPT = """You are a Principal Investigator (PI) reviewing a computational chemistry workflow plan.
@@ -26,6 +28,8 @@ AVAILABLE TOOLS:
 - optimize_structure_ase: Optimize geometry
 - calculate_energy_force: Calculate energy and forces
 
+{revision_context}
+
 REVIEW THE PLAN:
 {plan}
 
@@ -36,6 +40,7 @@ Provide your review as a JSON object with:
 
 If approved, explain why the plan is good.
 If rejected, explain what's wrong and how to fix it.
+{revision_instructions}
 """
 
 
@@ -47,13 +52,61 @@ def supervisor_node(state: AgentState) -> AgentState:
     Checks order of operations, feasibility, and safety.
     """
 
+    # Get the latest plan from state - ensure we're reading the current state
     plan = state.get("plan", [])
+    
+    # Debug: Print what plan the supervisor is seeing
+    logger.debug(f"🔍 Supervisor: Received plan from state: {plan}")
+    logger.debug(f"🔍 Supervisor: Plan type: {type(plan)}, Plan length: {len(plan) if plan else 0}")
+    logger.debug(f"🔍 Supervisor: Full state keys: {list(state.keys())}")
 
     if not plan:
         # No plan to review, skip
+        logger.warning("⚠️  Supervisor: No plan found in state!")
         state["is_plan_approved"] = False
         state["review_feedback"] = "No plan provided"
         return state
+
+    # Check if this is a revised plan
+    rejection_count = state.get("_rejection_count", 0)
+    previous_plan = state.get("_previous_plan", [])
+    previous_feedback = state.get("review_feedback", "")
+    
+    logger.debug(f"🔍 Supervisor: rejection_count={rejection_count}")
+    logger.debug(f"🔍 Supervisor: previous_plan={previous_plan} (length={len(previous_plan) if previous_plan else 0})")
+    logger.debug(f"🔍 Supervisor: current_plan={plan} (length={len(plan)})")
+    logger.debug(f"🔍 Supervisor: previous_feedback={previous_feedback[:100] if previous_feedback else 'None'}...")
+    
+    # Verify we have the latest plan - compare with previous if available
+    if previous_plan and plan == previous_plan:
+        logger.warning(f"⚠️  WARNING: Current plan is identical to previous plan! This might indicate a state update issue.")
+    elif previous_plan:
+        logger.info(f"✅ Plan has changed from previous version")
+    
+    # Build revision context if this is a revision
+    if rejection_count > 0 and previous_plan:
+        revision_context = f"""
+⚠️  REVISED PLAN - This is revision #{rejection_count + 1}
+
+PREVIOUS PLAN (that was rejected):
+{chr(10).join(f"{i+1}. {step}" for i, step in enumerate(previous_plan))}
+
+YOUR PREVIOUS FEEDBACK:
+{previous_feedback}
+
+CURRENT REVISED PLAN (to review):
+"""
+        revision_instructions = """
+
+IMPORTANT FOR REVISIONS:
+- Compare the revised plan with the previous plan and your feedback
+- Check if the revisions address your previous concerns
+- If the plan has improved based on your feedback, consider approving it
+- If the plan still has the same issues or new problems, provide specific feedback on what still needs to be fixed
+"""
+    else:
+        revision_context = ""
+        revision_instructions = ""
 
     # Create review prompt
     llm = get_supervisor_llm()
@@ -73,21 +126,23 @@ def supervisor_node(state: AgentState) -> AgentState:
 
     system_message = SystemMessage(
         content=SUPERVISOR_SYSTEM_PROMPT.format(
-            plan="\n".join(f"{i+1}. {step}" for i, step in enumerate(plan))
+            revision_context=revision_context,
+            plan="\n".join(f"{i+1}. {step}" for i, step in enumerate(plan)),
+            revision_instructions=revision_instructions
         )
     )
 
     # Get review
     try:
         review = structured_llm.invoke([system_message])
-        print(f"✅ Supervisor review: approved={review.approved}, feedback={review.feedback[:100]}...")
+        logger.info(f"✅ Supervisor review: approved={review.approved}, feedback={review.feedback[:100]}...")
     except Exception as e:
         # If structured output fails, fall back to manual parsing
-        print(f"⚠️  Structured output failed, attempting fallback: {e}")
+        logger.warning(f"⚠️  Structured output failed, attempting fallback: {e}")
         try:
             response = llm.invoke([system_message])
             content = response.content if hasattr(response, 'content') else str(response)
-            print(f"📝 Raw supervisor response: {content[:300]}...")
+            logger.debug(f"📝 Raw supervisor response: {content[:300]}...")
             
             # Try to parse JSON from response
             import json
@@ -105,9 +160,9 @@ def supervisor_node(state: AgentState) -> AgentState:
                         approved=parsed.get("approved", False),
                         feedback=parsed.get("feedback", content[:500])
                     )
-                    print(f"✅ Parsed review from fallback: approved={review.approved}")
+                    logger.info(f"✅ Parsed review from fallback: approved={review.approved}")
                 except json.JSONDecodeError as je:
-                    print(f"❌ JSON decode error: {je}")
+                    logger.error(f"❌ JSON decode error: {je}")
                     # Last resort: be lenient and approve if plan looks reasonable
                     review = SupervisorReview(
                         approved=len(plan) > 0,  # Approve if we have a plan
@@ -115,13 +170,13 @@ def supervisor_node(state: AgentState) -> AgentState:
                     )
             else:
                 # No JSON found, be lenient - approve if plan exists and looks reasonable
-                print(f"⚠️  No JSON found in response. Plan length: {len(plan)}")
+                logger.warning(f"⚠️  No JSON found in response. Plan length: {len(plan)}")
                 review = SupervisorReview(
                     approved=len(plan) > 0,  # Approve if we have a plan
                     feedback=f"Could not parse JSON from response. Auto-approving plan. Response preview: {content[:200]}"
                 )
         except Exception as fallback_error:
-            print(f"❌ Fallback parsing also failed: {fallback_error}")
+            logger.error(f"❌ Fallback parsing also failed: {fallback_error}")
             # Last resort: approve if plan exists
             review = SupervisorReview(
                 approved=len(plan) > 0,
@@ -131,5 +186,21 @@ def supervisor_node(state: AgentState) -> AgentState:
     # Update state
     state["is_plan_approved"] = review.approved
     state["review_feedback"] = review.feedback
+    
+    # Track rejection count to prevent infinite loops
+    if not review.approved:
+        rejection_count = state.get("_rejection_count", 0)
+        rejection_count += 1
+        state["_rejection_count"] = rejection_count
+        
+        # Auto-approve after 3 rejections to prevent infinite loop
+        if rejection_count >= 3:
+            logger.warning(f"⚠️  Auto-approving plan after {rejection_count} rejections to prevent infinite loop")
+            state["is_plan_approved"] = True
+            state["review_feedback"] = f"Auto-approved after {rejection_count} rejections. Previous feedback: {review.feedback}"
+    else:
+        # Reset rejection count and clear previous plan on approval
+        state["_rejection_count"] = 0
+        state["_previous_plan"] = []
 
     return state
