@@ -107,7 +107,7 @@ mof-backend/
 
 - **Linting**: `uv run ruff check app/`
 - **Format**: `uv run black app/`
-- **Type checking**: `uv run mypy app/` (requires mypy to be installed)
+- **Type checking**: Install mypy with `uv pip install mypy`, then run `uv run mypy app/`
 
 ### License
 
