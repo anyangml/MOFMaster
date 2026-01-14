@@ -1,40 +1,23 @@
 """
-Runner Agent - Deterministic Tool Execution via MCP
+Runner Agent - Deterministic Tool Execution via MCP (HTTP)
 """
 
 import os
-import sys
 import asyncio
+import json
 from typing import Dict, Any, List
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 
 from app.state import AgentState
 
 # Configuration for MCP server connection
-# This can be configured via environment variables to point to a completely separate repo
-MCP_SERVER_COMMAND = os.getenv("MCP_SERVER_COMMAND", sys.executable)
-# If provided as a list string like '["-m", "mcp_server.main"]', parse it
-MCP_SERVER_ARGS_RAW = os.getenv("MCP_SERVER_ARGS", '["-m", "mcp_server.main"]')
-try:
-    import json
-    MCP_SERVER_ARGS = json.loads(MCP_SERVER_ARGS_RAW)
-except:
-    MCP_SERVER_ARGS = [MCP_SERVER_ARGS_RAW]
-
-MCP_SERVER_PARAMS = StdioServerParameters(
-    command=MCP_SERVER_COMMAND,
-    args=MCP_SERVER_ARGS,
-    env=os.environ.copy(),
-)
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8080/mcp")
 
 
 async def runner_node(state: AgentState) -> AgentState:
     """
-    Runner Agent - Executes tools via MCP server.
-
-    Takes the current step from the plan, calls the MCP server tool,
-    and stores the result.
+    Runner Agent - Executes tools via MCP server over Streamable HTTP.
     """
 
     plan = state.get("plan", [])
@@ -52,39 +35,12 @@ async def runner_node(state: AgentState) -> AgentState:
         # Determine arguments based on tool and previous outputs
         kwargs = _prepare_tool_args(tool_name, tool_outputs, state)
 
-        # Execute via MCP
-        async with stdio_client(MCP_SERVER_PARAMS) as (read, write):
+        # Execute via Streamable HTTP
+        async with streamable_http_client(MCP_SERVER_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
-                # Initialize session
                 await session.initialize()
-                
-                # Call the tool
-                # MCP tools in FastMCP usually have the same name as the function
                 result = await session.call_tool(tool_name, kwargs)
-                
-                # result.content is a list of content objects (TextContent, etc.)
-                # We expect a JSON-like dictionary from our implementation
-                if result.is_error:
-                    tool_outputs[f"step_{current_step}_{tool_name}"] = {
-                        "error": str(result.content),
-                        "tool_name": tool_name
-                    }
-                else:
-                    # In FastMCP, return values are often wrapped or returned as text
-                    # If we returned a dict in the server, it might be in result.content[0].text as JSON
-                    # But the MCP SDK often handles this mapping. 
-                    # Assuming the content is what we returned.
-                    output_data = result.content[0].text if result.content else {}
-                    
-                    # Try to parse if it's a string, otherwise use as is
-                    import json
-                    try:
-                        if isinstance(output_data, str):
-                            output_data = json.loads(output_data)
-                    except:
-                        pass
-                        
-                    tool_outputs[f"step_{current_step}_{tool_name}"] = output_data
+                tool_outputs[f"step_{current_step}_{tool_name}"] = _process_mcp_result(result, tool_name)
 
     except Exception as e:
         # Store error
@@ -97,6 +53,26 @@ async def runner_node(state: AgentState) -> AgentState:
     return state
 
 
+def _process_mcp_result(result: Any, tool_name: str) -> Dict[str, Any]:
+    """Helper to process MCP tool results into standard dictionary format."""
+    if result.is_error:
+        return {
+            "error": str(result.content),
+            "tool_name": tool_name
+        }
+    
+    output_data = result.content[0].text if result.content else {}
+    
+    # Try to parse if it's a string, otherwise use as is
+    try:
+        if isinstance(output_data, str):
+            output_data = json.loads(output_data)
+    except:
+        pass
+        
+    return output_data
+
+
 def _prepare_tool_args(
     tool_name: str, tool_outputs: Dict[str, Any], state: AgentState
 ) -> Dict[str, Any]:
@@ -104,20 +80,24 @@ def _prepare_tool_args(
     Prepare arguments for tool execution.
     """
 
-    if tool_name == "search_mof_db":
-        return {"query_string": state.get("original_query", "")}
+    if tool_name == "search_mofs":
+        return {"query": state.get("original_query", "")}
 
-    elif tool_name == "optimize_structure_ase":
-        cif_filepath = _find_cif_filepath(tool_outputs)
-        if not cif_filepath:
-            raise ValueError("No CIF file found in previous outputs for optimization")
-        return {"cif_filepath": cif_filepath}
+    elif tool_name == "optimize_structure":
+        # Search for a mof name in outputs
+        for key, val in tool_outputs.items():
+            if isinstance(val, list) and len(val) > 0 and "name" in val[0]:
+                return {"name": val[0]["name"]}
+            if isinstance(val, dict) and "name" in val:
+                return {"name": val["name"]}
+        return {"name": "Unknown MOF"}
 
-    elif tool_name == "calculate_energy_force":
+    elif tool_name == "calculate_energy":
+        # Needs data (CIF string or path)
         cif_filepath = _find_cif_filepath(tool_outputs, prefer_optimized=True)
         if not cif_filepath:
-            raise ValueError("No CIF file found in previous outputs for energy calculation")
-        return {"cif_filepath": cif_filepath}
+             return {"data": "No structure provided"}
+        return {"data": cif_filepath}
 
     else:
         return {}
