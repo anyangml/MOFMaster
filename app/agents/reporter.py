@@ -36,7 +36,7 @@ Generate a professional report answering the user's query.
 """
 
 
-def reporter_node(state: AgentState) -> AgentState:
+async def reporter_node(state: AgentState) -> AgentState:
     """
     Reporter Agent - Final node that synthesizes results.
 
@@ -70,7 +70,7 @@ def reporter_node(state: AgentState) -> AgentState:
     )
 
     # Generate report
-    response = llm.invoke([system_message])
+    response = await llm.ainvoke([system_message])
 
     # Add to messages
     state["messages"].append(response)

@@ -65,7 +65,7 @@ Available tool names:
 """
 
 
-def analyzer_node(state: AgentState) -> AgentState:
+async def analyzer_node(state: AgentState) -> AgentState:
     """
     Analyzer Agent - First node in the graph.
 
@@ -118,7 +118,7 @@ IMPORTANT: Please carefully consider this feedback and create an improved plan t
     )
 
     # Invoke LLM
-    response = llm.invoke([system_message] + messages)
+    response = await llm.ainvoke([system_message] + messages)
 
     # Parse response - look for JSON in the content
     content = response.content

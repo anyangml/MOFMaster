@@ -44,7 +44,7 @@ If rejected, explain what's wrong and how to fix it.
 """
 
 
-def supervisor_node(state: AgentState) -> AgentState:
+async def supervisor_node(state: AgentState) -> AgentState:
     """
     Supervisor Agent - Reviews the plan for scientific soundness.
 
@@ -134,13 +134,13 @@ IMPORTANT FOR REVISIONS:
 
     # Get review
     try:
-        review = structured_llm.invoke([system_message])
+        review = await structured_llm.ainvoke([system_message])
         logger.info(f"✅ Supervisor review: approved={review.approved}, feedback={review.feedback[:100]}...")
     except Exception as e:
         # If structured output fails, fall back to manual parsing
         logger.warning(f"⚠️  Structured output failed, attempting fallback: {e}")
         try:
-            response = llm.invoke([system_message])
+            response = await llm.ainvoke([system_message])
             content = response.content if hasattr(response, 'content') else str(response)
             logger.debug(f"📝 Raw supervisor response: {content[:300]}...")
             
