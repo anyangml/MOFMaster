@@ -59,9 +59,9 @@ OUTPUT FORMAT when out of scope:
 ```
 
 Available tool names:
-- search_mof_db
-- optimize_structure_ase
-- calculate_energy_force
+- search_mofs
+- optimize_structure
+- calculate_energy
 """
 
 
