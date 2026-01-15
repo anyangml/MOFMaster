@@ -31,20 +31,66 @@ async def runner_node(state: AgentState) -> AgentState:
     # Get the current tool to execute
     tool_name = plan[current_step]
 
+    print(f"[DEBUG] Runner Agent: Connecting to MCP server at {MCP_SERVER_URL}")
+    print(f"[DEBUG] Attempting to execute tool '{tool_name}' with current_step={current_step}")
+
     try:
         # Determine arguments based on tool and previous outputs
         kwargs = _prepare_tool_args(tool_name, tool_outputs, state)
+        print(f"[DEBUG] Tool arguments prepared for '{tool_name}': {json.dumps(kwargs)}")
 
         # Execute via Streamable HTTP
+        print(f"[DEBUG] Initializing Streamable HTTP client for {MCP_SERVER_URL}...")
         async with streamable_http_client(MCP_SERVER_URL) as (read, write, _):
+            print(f"[DEBUG] Connected to streamable HTTP endpoint")
             async with ClientSession(read, write) as session:
+                print(f"[DEBUG] ClientSession created. Initializing session...")
                 await session.initialize()
+                print(f"[DEBUG] MCP session successfully initialized")
+                
+                # Verify server connectivity and tool availability
+                print(f"[DEBUG] Requesting tool list from MCP server...")
+                tools_response = await session.list_tools()
+                available_tools = [t.name for t in tools_response.tools] if hasattr(tools_response, 'tools') else []
+                print(f"[DEBUG] MCP Server Status: Online. Available tools: {available_tools}")
+                
+                if tool_name not in available_tools:
+                    print(f"[WARNING] Tool '{tool_name}' not found in available tools list!")
+                
+                print(f"[DEBUG] Proceeding to call tool '{tool_name}'...")
                 result = await session.call_tool(tool_name, kwargs)
-                tool_outputs[f"step_{current_step}_{tool_name}"] = _process_mcp_result(result, tool_name)
+                print(f"[DEBUG] Tool call to '{tool_name}' completed")
+                
+                processed_result = _process_mcp_result(result, tool_name)
+                tool_outputs[f"step_{current_step}_{tool_name}"] = processed_result
+                print(f"[DEBUG] Tool output processed and stored for step {current_step}")
 
     except Exception as e:
         # Store error
-        tool_outputs[f"step_{current_step}_{tool_name}"] = {"error": str(e), "tool_name": tool_name}
+        import traceback
+        full_tb = traceback.format_exc()
+        error_msg = str(e)
+        
+        # Enhanced handling for ExceptionGroup (common with anyio/mcp)
+        if hasattr(e, "exceptions"):
+            # Python 3.11+ ExceptionGroup
+            sub_errors = []
+            for se in e.exceptions:
+                sub_se = f"[{type(se).__name__}] {str(se)}"
+                if hasattr(se, "exceptions"): # Nested ExceptionGroups
+                    sub_se += f" (Sub: {[str(sse) for sse in se.exceptions]})"
+                sub_errors.append(sub_se)
+            error_msg = f"{type(e).__name__}: {str(e)} -> {', '.join(sub_errors)}"
+        else:
+            error_msg = f"{type(e).__name__}: {str(e)}"
+            
+        print(f"[ERROR] Runner Agent failed executing tool '{tool_name}': {error_msg}")
+        print(f"[DEBUG] Full stack trace:\n{full_tb}")
+        tool_outputs[f"step_{current_step}_{tool_name}"] = {
+            "error": error_msg, 
+            "tool_name": tool_name,
+            "traceback": full_tb[:500] # Include snippet of TB in state
+        }
 
     # Update state
     state["tool_outputs"] = tool_outputs
@@ -55,18 +101,32 @@ async def runner_node(state: AgentState) -> AgentState:
 
 def _process_mcp_result(result: Any, tool_name: str) -> Dict[str, Any]:
     """Helper to process MCP tool results into standard dictionary format."""
-    if result.is_error:
+    # Check for error status
+    is_error = getattr(result, "isError", False)
+    if is_error:
         return {
             "error": str(result.content),
             "tool_name": tool_name
         }
     
-    output_data = result.content[0].text if result.content else {}
+    # Extract content - MCP results usually have a 'content' list
+    if not hasattr(result, "content") or not result.content:
+        return {}
+        
+    # Standard MCP content items have a 'text' field
+    output_data = result.content[0].text if hasattr(result.content[0], "text") else str(result.content[0])
     
     # Try to parse if it's a string, otherwise use as is
     try:
         if isinstance(output_data, str):
-            output_data = json.loads(output_data)
+            # Strip any markdown formatting if present
+            cleaned_data = output_data.strip()
+            if cleaned_data.startswith("```json"):
+                import re
+                match = re.search(r"```json\s*(\{.*?\})\s*```", cleaned_data, re.DOTALL)
+                if match:
+                    cleaned_data = match.group(1)
+            output_data = json.loads(cleaned_data)
     except:
         pass
         
@@ -78,26 +138,45 @@ def _prepare_tool_args(
 ) -> Dict[str, Any]:
     """
     Prepare arguments for tool execution.
+    Handles multiple variations of tool names and argument keys.
     """
+    original_query = state.get("original_query", "")
 
+    # 1. Search tools
     if tool_name == "search_mofs":
-        return {"query": state.get("original_query", "")}
+        # Use refined search_query from analyzer if available
+        search_query = state.get("search_query", original_query)
+        return {"query": search_query, "query_string": search_query}
 
+    # 2. Optimization tools
     elif tool_name == "optimize_structure":
-        # Search for a mof name in outputs
+        # Try to find a CIF path
+        cif_path = _find_cif_filepath(tool_outputs)
+        
+        # Try to find a MOF name as fallback
+        mof_name = "Unknown MOF"
         for key, val in tool_outputs.items():
-            if isinstance(val, list) and len(val) > 0 and "name" in val[0]:
-                return {"name": val[0]["name"]}
-            if isinstance(val, dict) and "name" in val:
-                return {"name": val["name"]}
-        return {"name": "Unknown MOF"}
+            if isinstance(val, list) and len(val) > 0:
+                if isinstance(val[0], dict):
+                    mof_name = val[0].get("name") or val[0].get("mof_name") or mof_name
+            elif isinstance(val, dict):
+                mof_name = val.get("name") or val.get("mof_name") or mof_name
+        
+        return {
+            "cif_filepath": cif_path,
+            "filepath": cif_path,
+            "name": mof_name,
+            "mof_name": mof_name
+        }
 
+    # 3. Energy tools
     elif tool_name == "calculate_energy":
-        # Needs data (CIF string or path)
-        cif_filepath = _find_cif_filepath(tool_outputs, prefer_optimized=True)
-        if not cif_filepath:
-             return {"data": "No structure provided"}
-        return {"data": cif_filepath}
+        cif_path = _find_cif_filepath(tool_outputs, prefer_optimized=True)
+        return {
+            "cif_filepath": cif_path,
+            "filepath": cif_path,
+            "data": cif_path
+        }
 
     else:
         return {}
@@ -115,7 +194,15 @@ def _find_cif_filepath(tool_outputs: Dict[str, Any], prefer_optimized: bool = Fa
     for key in sorted(tool_outputs.keys()):
         output = tool_outputs[key]
 
-        if isinstance(output, dict):
+        if isinstance(output, list) and len(output) > 0 and isinstance(output[0], dict):
+            # Take first result from search if it matches
+            first = output[0]
+            if "cif_filepath" in first:
+                original_path = first["cif_filepath"]
+            if "optimized_cif_filepath" in first:
+                optimized_path = first["optimized_cif_filepath"]
+
+        elif isinstance(output, dict):
             if "optimized_cif_filepath" in output:
                 optimized_path = output["optimized_cif_filepath"]
 

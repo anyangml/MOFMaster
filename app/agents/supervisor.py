@@ -19,14 +19,14 @@ Your job is to ensure the plan is:
 3. SAFE - Won't waste compute or cause errors
 
 SCIENTIFIC RULES:
-- Structure acquisition (search_mof_db) must happen before operations on structures
-- Optimization (optimize_structure_ase) should typically happen before energy calculations
-- Energy calculations (calculate_energy_force) should use optimized structures when possible
+- Structure acquisition (search_mofs) must happen before operations on structures
+- Optimization (optimize_structure) should typically happen before energy calculations
+- Energy calculations (calculate_energy) should use optimized structures when possible
 
 AVAILABLE TOOLS:
-- search_mof_db: Search for MOF structures
-- optimize_structure_ase: Optimize geometry
-- calculate_energy_force: Calculate energy and forces
+- search_mofs: Search for MOF structures
+- optimize_structure: Optimize geometry
+- calculate_energy: Calculate energy and forces
 
 {revision_context}
 

@@ -38,7 +38,8 @@ OUTPUT FORMAT when ready to plan:
 ```json
 {{
   "status": "ready",
-  "plan": ["tool_name_1", "tool_name_2", "tool_name_3"]
+  "plan": ["tool_name_1", "tool_name_2"],
+  "search_query": "concise search term (e.g. 'HKUST-1' or 'copper')"
 }}
 ```
 
@@ -161,6 +162,7 @@ IMPORTANT: Please carefully consider this feedback and create an improved plan t
             pass
 
     if parsed and isinstance(parsed, dict):
+        logger.debug(f"DEBUG Analyzer parsed JSON: {json.dumps(parsed)}")
         try:
             if parsed.get("status") == "ready" and "plan" in parsed:
                 logger.info(f"✅ Analyzer: Successfully processed 'ready' status")
@@ -196,6 +198,7 @@ IMPORTANT: Please carefully consider this feedback and create an improved plan t
                     "messages": [new_message],
                     "plan": new_plan,
                     "original_query": user_query,
+                    "search_query": parsed.get("search_query", user_query),
                     "current_step": 0
                 }
                 
