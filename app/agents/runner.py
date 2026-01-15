@@ -5,11 +5,15 @@ Runner Agent - Deterministic Tool Execution via MCP (HTTP)
 import os
 import asyncio
 import json
+import logging
 from typing import Dict, Any, List
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from app.state import AgentState
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 # Configuration for MCP server connection
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8080/mcp")
@@ -31,39 +35,39 @@ async def runner_node(state: AgentState) -> AgentState:
     # Get the current tool to execute
     tool_name = plan[current_step]
 
-    print(f"[DEBUG] Runner Agent: Connecting to MCP server at {MCP_SERVER_URL}")
-    print(f"[DEBUG] Attempting to execute tool '{tool_name}' with current_step={current_step}")
+    logger.debug(f"Runner Agent: Connecting to MCP server at {MCP_SERVER_URL}")
+    logger.debug(f"Attempting to execute tool '{tool_name}' with current_step={current_step}")
 
     try:
         # Determine arguments based on tool and previous outputs
         kwargs = _prepare_tool_args(tool_name, tool_outputs, state)
-        print(f"[DEBUG] Tool arguments prepared for '{tool_name}': {json.dumps(kwargs)}")
+        logger.debug(f"Tool arguments prepared for '{tool_name}': {json.dumps(kwargs)}")
 
         # Execute via Streamable HTTP
-        print(f"[DEBUG] Initializing Streamable HTTP client for {MCP_SERVER_URL}...")
+        logger.debug(f"Initializing Streamable HTTP client for {MCP_SERVER_URL}...")
         async with streamable_http_client(MCP_SERVER_URL) as (read, write, _):
-            print(f"[DEBUG] Connected to streamable HTTP endpoint")
+            logger.debug(f"Connected to streamable HTTP endpoint")
             async with ClientSession(read, write) as session:
-                print(f"[DEBUG] ClientSession created. Initializing session...")
+                logger.debug(f"ClientSession created. Initializing session...")
                 await session.initialize()
-                print(f"[DEBUG] MCP session successfully initialized")
+                logger.debug(f"MCP session successfully initialized")
                 
                 # Verify server connectivity and tool availability
-                print(f"[DEBUG] Requesting tool list from MCP server...")
+                logger.debug(f"Requesting tool list from MCP server...")
                 tools_response = await session.list_tools()
                 available_tools = [t.name for t in tools_response.tools] if hasattr(tools_response, 'tools') else []
-                print(f"[DEBUG] MCP Server Status: Online. Available tools: {available_tools}")
+                logger.debug(f"MCP Server Status: Online. Available tools: {available_tools}")
                 
                 if tool_name not in available_tools:
-                    print(f"[WARNING] Tool '{tool_name}' not found in available tools list!")
+                    logger.warning(f"Tool '{tool_name}' not found in available tools list!")
                 
-                print(f"[DEBUG] Proceeding to call tool '{tool_name}'...")
+                logger.debug(f"Proceeding to call tool '{tool_name}'...")
                 result = await session.call_tool(tool_name, kwargs)
-                print(f"[DEBUG] Tool call to '{tool_name}' completed")
+                logger.debug(f"Tool call to '{tool_name}' completed")
                 
                 processed_result = _process_mcp_result(result, tool_name)
                 tool_outputs[f"step_{current_step}_{tool_name}"] = processed_result
-                print(f"[DEBUG] Tool output processed and stored for step {current_step}")
+                logger.debug(f"Tool output processed and stored for step {current_step}")
 
     except Exception as e:
         # Store error
@@ -84,8 +88,8 @@ async def runner_node(state: AgentState) -> AgentState:
         else:
             error_msg = f"{type(e).__name__}: {str(e)}"
             
-        print(f"[ERROR] Runner Agent failed executing tool '{tool_name}': {error_msg}")
-        print(f"[DEBUG] Full stack trace:\n{full_tb}")
+        logger.error(f"Runner Agent failed executing tool '{tool_name}': {error_msg}")
+        logger.debug(f"Full stack trace:\n{full_tb}")
         tool_outputs[f"step_{current_step}_{tool_name}"] = {
             "error": error_msg, 
             "tool_name": tool_name,
