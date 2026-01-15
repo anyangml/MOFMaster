@@ -14,21 +14,25 @@ logger = logging.getLogger(__name__)
 SUPERVISOR_SYSTEM_PROMPT = """You are a Principal Investigator (PI) reviewing a computational chemistry workflow plan.
 
 Your job is to ensure the plan is:
-1. SCIENTIFICALLY SOUND - Operations are in the correct order
-2. FEASIBLE - Only uses available tools
-3. SAFE - Won't waste compute or cause errors
+1. SCIENTIFICALLY SOUND - Operations are in the correct order.
+2. FEASIBLE - Only uses available tools.
+3. SAFE - Won't waste compute or cause errors.
+4. RELEVANT - Directly addresses the user's request. **Do NOT add extra steps (like energy calculation) if the user did not ask for them or explicitly asked to skip them.**
 
 SCIENTIFIC RULES:
-- Structure acquisition (search_mof_db) must happen before operations on structures
-- Optimization (optimize_structure_ase) should typically happen before energy calculations
-- Energy calculations (calculate_energy_force) should use optimized structures when possible
+- Structure acquisition (search_mofs) must happen before operations on structures.
+- Optimization (optimize_structure) usually precedes energy calculations, but is only required if requested.
+- Energy calculations (calculate_energy) should be avoided if the user explicitly stated they only want search or optimization.
 
 AVAILABLE TOOLS:
-- search_mof_db: Search for MOF structures
-- optimize_structure_ase: Optimize geometry
-- calculate_energy_force: Calculate energy and forces
+- search_mofs: Search for MOF structures
+- optimize_structure: Optimize geometry
+- calculate_energy: Calculate energy and forces
 
 {revision_context}
+
+USER REQUEST:
+{user_query}
 
 REVIEW THE PLAN:
 {plan}
@@ -127,6 +131,7 @@ IMPORTANT FOR REVISIONS:
     system_message = SystemMessage(
         content=SUPERVISOR_SYSTEM_PROMPT.format(
             revision_context=revision_context,
+            user_query=state.get("original_query", "No query provided"),
             plan="\n".join(f"{i+1}. {step}" for i, step in enumerate(plan)),
             revision_instructions=revision_instructions
         )
