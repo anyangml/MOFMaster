@@ -16,52 +16,68 @@ def load_knowledge_base() -> str:
         return f.read()
 
 
-ANALYZER_SYSTEM_PROMPT = """You are a computational chemistry assistant specializing in Metal-Organic Frameworks (MOFs).
+ANALYZER_SYSTEM_PROMPT = """You are the Planning & Analysis agent for the MOF-Scientist backend.
 
-Your job is to:
-1. Check if the user query is IN SCOPE (refer to the knowledge base below)
-2. Check if you have all necessary CONTEXT to proceed
-3. Generate a STEP-BY-STEP PLAN using available tools
-4. Only include tools that are necessary to answer THE SPECIFIC REQUEST. Do NOT add unnecessary optimization or energy steps if the user only asked for a search.
+You specialize in computational chemistry workflows for Metal-Organic Frameworks (MOFs).
 
-KNOWLEDGE BASE:
+Your responsibilities are to:
+1. Determine whether the user query is IN SCOPE (using the knowledge base below).
+2. Check if you have all necessary CONTEXT to proceed (structures, CIF paths, etc.).
+3. Design a SCIENTIFICALLY SOUND, MULTI-STEP PLAN using the available tools.
+4. Use the knowledge base as your contract for how tools should be combined.
+5. Avoid unnecessary computation, but do include optimization/energy steps when they are scientifically appropriate for the user’s goal.
+
+KNOWLEDGE BASE (authoritative description of role, tools, and workflows):
 {knowledge_base}
 
 {feedback_section}
 
-INSTRUCTIONS:
-- If the query is OUT OF SCOPE, politely explain what you cannot do and suggest alternatives
-- If you're missing context (e.g., user asks for energy but no structure provided), ask for it
-- If ready to proceed, output a **valid JSON object** following the "ready" format below.
-
-- Only include tools that are necessary to answer THE SPECIFIC REQUEST. Do NOT add unnecessary optimization or energy steps if the user only asked for a search.
+PLANNING GUIDELINES:
+- Think in terms of workflows, not single tool calls.
+- Follow the default order of operations when appropriate:
+    - structure acquisition → geometry optimization → energy/force calculation.
+- It is acceptable to:
+    - Use only `search_mofs` when the user only wants candidates or a quick lookup.
+    - Use `optimize_structure` → `calculate_energy` when the user provides a specific structure.
+    - Perform screening workflows over multiple candidates (e.g., search → filter → optimize/energy for a small subset).
+- Do NOT add expensive steps (especially energy calculations) if the user explicitly requested to avoid them.
+- If the user’s intent is ambiguous (e.g., "find a stable Cu-based MOF"), you may include optimization and/or energy calculations as part of a reasonable scientific workflow.
 - If there is supervisor feedback, carefully consider it and improve your plan accordingly.
+
+SCOPE AND CONTEXT HANDLING:
+- If the query is OUT OF SCOPE according to the knowledge base, politely explain what you cannot do and, when possible, suggest alternative analyses you *can* perform.
+- If you are missing critical context (e.g., user asks for energy but no structure or CIF path is available and cannot be inferred), ask a concise clarification question.
+
+OUTPUT REQUIREMENTS:
+- When you are ready to plan, you MUST output a **valid JSON object** in one of the formats below. Do not include any extra text outside the JSON.
 
 OUTPUT FORMAT when ready to plan:
 ```json
 {{
-  "status": "ready",
-  "plan": ["tool_name_1", "tool_name_2"]
+    "status": "ready",
+    "plan": ["tool_name_1", "tool_name_2"]
 }}
 ```
 
-OUTPUT FORMAT when need more info:
+The `plan` is an ordered list of tool names, each entry being one of the available tools below. Tools may appear multiple times if needed.
+
+OUTPUT FORMAT when you need more information:
 ```json
 {{
-  "status": "need_context",
-  "question": "What information do you need from the user?"
+    "status": "need_context",
+    "question": "What information do you need from the user?"
 }}
 ```
 
-OUTPUT FORMAT when out of scope:
+OUTPUT FORMAT when the request is out of scope:
 ```json
 {{
-  "status": "out_of_scope",
-  "reason": "Why this is not supported"
+    "status": "out_of_scope",
+    "reason": "Why this is not supported"
 }}
 ```
 
-Available tool names:
+Available tool names (must match exactly):
 - search_mofs
 - optimize_structure
 - calculate_energy
@@ -121,7 +137,32 @@ IMPORTANT: Please carefully consider this feedback and create an improved plan t
     )
 
     # Invoke LLM
-    response = await llm.ainvoke([system_message] + messages)
+    try:
+        response = await llm.ainvoke([system_message] + messages)
+    except Exception as e:
+        # Avoid surfacing provider errors as 500s. Return a structured JSON response per contract.
+        logger.exception("❌ Analyzer: LLM invocation failed")
+        import json
+
+        msg = str(e)
+        if "filtered due to the prompt triggering" in msg.lower() or "content management policy" in msg.lower():
+            payload = {
+                "status": "out_of_scope",
+                "reason": "The upstream LLM provider blocked this request due to content filtering. Please rephrase and try again.",
+            }
+        else:
+            payload = {
+                "status": "out_of_scope",
+                "reason": f"The planning model failed unexpectedly: {msg}",
+            }
+
+        return {
+            "messages": [AIMessage(content=json.dumps(payload, ensure_ascii=False))],
+            "original_query": user_query or "",
+            "plan": [],
+            "current_step": 0,
+            "is_plan_approved": False,
+        }
 
     # Parse response - look for JSON in the content
     content = response.content
@@ -209,17 +250,14 @@ IMPORTANT: Please carefully consider this feedback and create an improved plan t
                 return updates
                 
             elif parsed.get("status") == "need_context":
-                return {
-                    "messages": [AIMessage(content=parsed.get("question", "I need more information."))]
+                payload = {
+                    "status": "need_context",
+                    "question": parsed.get("question", "I need more information."),
                 }
+                return {"messages": [AIMessage(content=json.dumps(payload, ensure_ascii=False))], "plan": []}
             elif parsed.get("status") == "out_of_scope":
-                return {
-                    "messages": [
-                        AIMessage(
-                            content=f"I'm sorry, but this request is outside my current capabilities. {parsed.get('reason', '')}"
-                        )
-                    ]
-                }
+                payload = {"status": "out_of_scope", "reason": parsed.get("reason", "")}
+                return {"messages": [AIMessage(content=json.dumps(payload, ensure_ascii=False))], "plan": []}
         except Exception as e:
             logger.error(f"❌ Analyzer: Error processing parsed JSON: {e}")
             return {"messages": [response]}

@@ -191,12 +191,13 @@ Visit `http://localhost:8000/mof-scientist/playground` for interactive testing.
 
 ## Knowledge Base
 
-The `README_KNOWLEDGE.md` file provides:
-- Tool descriptions
-- Workflow patterns
-- Scope guidelines
-- Scientific rules
-- Response formatting guidelines
+The `README_KNOWLEDGE.md` file serves as the **system prompt / knowledge base** and provides:
+- Agent role and overall objectives
+- Tool descriptions and capabilities
+- Recommended workflow patterns and order of operations
+- Scope guidelines and limitations
+- Scientific rules for when to use each tool
+- Response and interaction style guidelines
 
 This file is read by the Analyzer agent to understand system capabilities.
 

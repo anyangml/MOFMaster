@@ -6,6 +6,17 @@ __pycache__/
 # MOF Backend specific
 data/*.cif
 
+# Local evaluation outputs
+data/evals/
+
+# Local server PID files
+server_nohup.pid
+
+# Editor swap files
+*.swp
+*.swo
+*.swx
+
 # C extensions
 *.so
 
